@@ -1,7 +1,7 @@
 """Step 3: apply the location and work-type rules, then score jobs against your skills.
 
 Lahore table   : any work type located in Lahore, plus remote jobs elsewhere in Pakistan.
-Worldwide table: work types listed in WORLDWIDE_WORK_TYPES (default remote, hybrid, on-site).
+Worldwide table: work types listed in WORLDWIDE_WORK_TYPES (default remote).
 A job is kept when it mentions at least MIN_MATCHED_SKILLS of your skills (default 1).
 Jobs are sorted by how many of your skills they match.
 """
