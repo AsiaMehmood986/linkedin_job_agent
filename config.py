@@ -1,5 +1,6 @@
-"""All settings live here. Values come from the .env file (or GitHub Actions secrets).
-An empty value (e.g. a secret that was never set) falls back to the default."""
+"""All settings live here.
+Change the numbers and words in the SETTINGS section below. Only the API keys and
+email addresses come from GitHub Secrets (or a local .env file)."""
 import os
 from pathlib import Path
 
@@ -7,58 +8,59 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# ============================================================
+#  SETTINGS YOU CAN CHANGE (edit the numbers/words below)
+# ============================================================
+# Search depth
+MAX_SEARCH_KEYWORDS = 5        # how many of your skills are used as search words
+MAX_PAGES_PER_SEARCH = 3       # pages per search, 25 jobs each (3 = up to 75 jobs)
+MAX_DETAIL_FETCH = 200         # job pages read per run
+POSTED_WITHIN_HOURS = 24       # only jobs posted in the last N hours
 
+# Matching
+MIN_MATCHED_SKILLS = 1         # a job must mention at least this many of your skills
+MIN_SCORE = 0                  # extra % threshold (0 = off)
+EMAIL_ALL_JOBS = False         # False = only skill matches are emailed
+
+# Tables
+WORLDWIDE_WORK_TYPES = ["remote"]          # worldwide table: remote only
+MAX_PER_TABLE = 200                        # max rows per table
+ONSITE_LOCATIONS = ["Lahore, Pakistan", "Lahore, Punjab, Pakistan"]  # Lahore searches
+
+# Email
+SEND_EMPTY_DIGEST = False      # True = also send an email when nothing matched
+CHECK_EVERY_HOURS = 3          # used only with: python main.py --loop
+
+# Words to ignore when reading CVs, and skills to always add
+BLOCKED_SKILLS = ["huawei", "islamabad"]
+EXTRA_SKILLS = []
+
+# ============================================================
+#  Technical settings (no need to change)
+# ============================================================
 def _env(name, default):
     value = (os.getenv(name) or "").strip()
     return value if value else default
 
 
-def _list(name, default, sep=","):
-    return [x.strip() for x in _env(name, default).split(sep) if x.strip()]
-
-
-def _bool(name, default):
-    return _env(name, "true" if default else "false").lower() in ("1", "true", "yes")
-
-
+# CV PDFs are read from the code folder unless CV_FOLDER is set
 CV_FOLDER = _env("CV_FOLDER", str(Path(__file__).resolve().parent))
-BLOCKED_SKILLS = _list("BLOCKED_SKILLS", "huawei,islamabad")  # words to ignore
-EXTRA_SKILLS = _list("EXTRA_SKILLS", "")                       # skills to always add
 
-# LAHORE table: searches here return remote, hybrid and on-site jobs.
-ONSITE_LOCATIONS = _list("ONSITE_LOCATIONS", "Lahore, Pakistan|Lahore, Punjab, Pakistan", "|")
-
-# WORLDWIDE table: one worldwide search per keyword.
+# Worldwide table uses a single worldwide search per keyword
 REMOTE_LOCATIONS = ["Worldwide"]
-# Used ONLY if the Worldwide search returns nothing (LinkedIn needs some location)
 REMOTE_FALLBACK = ["United States", "United Kingdom", "Canada", "Germany", "Netherlands",
                    "Australia", "United Arab Emirates", "Singapore"]
-# Work types allowed in the Worldwide table. The Lahore table always takes every type.
-WORLDWIDE_WORK_TYPES = _list("WORLDWIDE_WORK_TYPES", "remote")
+PAGE_SIZE = 25
 
-# Search depth
-MAX_SEARCH_KEYWORDS = int(_env("MAX_SEARCH_KEYWORDS", "5"))
-MAX_PAGES_PER_SEARCH = int(_env("MAX_PAGES_PER_SEARCH", "3"))   # LinkedIn gives 25 jobs per page
-MAX_DETAIL_FETCH = int(_env("MAX_DETAIL_FETCH", "200"))         # job pages read per run
-POSTED_WITHIN_HOURS = int(_env("POSTED_WITHIN_HOURS", "24"))
-
-# Relevance
-MIN_MATCHED_SKILLS = int(_env("MIN_MATCHED_SKILLS", "1"))  # a job needs at least this many of your skills
-MIN_SCORE = int(_env("MIN_SCORE", "0"))                  # optional extra % threshold (0 = off)
-EMAIL_ALL_JOBS = _bool("EMAIL_ALL_JOBS", False)          # False = only jobs that match your skills
-MAX_PER_TABLE = int(_env("MAX_PER_TABLE", "200"))
-SEND_EMPTY_DIGEST = _bool("SEND_EMPTY_DIGEST", False)    # True = email even when nothing matched
-CHECK_EVERY_HOURS = float(_env("CHECK_EVERY_HOURS", "3"))
-
-# Email (Resend: resend.com)
+# Email (Resend: resend.com). Keys come from GitHub Secrets.
 RESEND_API_KEY = _env("RESEND_API_KEY", "")
 EMAIL_FROM = _env("EMAIL_FROM", "Job Agent <onboarding@resend.dev>")
 EMAIL_TO = _env("EMAIL_TO", "")
 
 # Tailored CVs (not used in the current flow)
-TAILOR_CVS = _bool("TAILOR_CVS", True)
-TAILOR_TOP_N = int(_env("TAILOR_TOP_N", "16"))
-BASE_CV = _env("BASE_CV", "")
+TAILOR_CVS = False
+TAILOR_TOP_N = 16
+BASE_CV = ""
 OUTPUT_DIR = Path(__file__).resolve().parent / "tailored_cvs"
 
 SEEN_FILE = str(Path(__file__).resolve().parent / "seen_jobs.json")
