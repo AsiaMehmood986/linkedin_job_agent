@@ -12,10 +12,10 @@ load_dotenv()
 #  SETTINGS YOU CAN CHANGE (edit the numbers/words below)
 # ============================================================
 # Search depth
-MAX_SEARCH_KEYWORDS = 5        # how many of your skills are used as search words
+MAX_SEARCH_KEYWORDS = 8        # how many of your skills are used as search words
 MAX_PAGES_PER_SEARCH = 3       # pages per search, 25 jobs each (3 = up to 75 jobs)
 MAX_DETAIL_FETCH = 200         # job pages read per run
-POSTED_WITHIN_HOURS = 24       # only jobs posted in the last N hours
+POSTED_WITHIN_HOURS = 72       # only jobs posted in the last N hours
 
 # Matching
 MIN_MATCHED_SKILLS = 1         # a job must mention at least this many of your skills
