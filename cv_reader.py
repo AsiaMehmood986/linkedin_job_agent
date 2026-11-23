@@ -18,7 +18,7 @@ def read_cv_text(pdf_path: str) -> str:
 
 def extract_skills(cv_text: str) -> list[str]:
     llm = ChatGroq(
-        model=(os.getenv("GROQ_MODEL") or "llama-3.3-70b-versatile"),
+                model=(os.getenv("GROQ_MODEL") or "llama-3.3-70b-versatile"),
         temperature=0,
     )
     prompt = (
