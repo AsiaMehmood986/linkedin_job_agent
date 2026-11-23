@@ -1,7 +1,7 @@
 """Step 3: apply the location and work-type rules, then score jobs against your skills.
 
 Lahore table   : any work type located in Lahore, plus remote jobs elsewhere in Pakistan.
-Worldwide table: work types listed in WORLDWIDE_WORK_TYPES (default remote).
+Worldwide table: remote jobs only (WORLDWIDE_WORK_TYPES in config.py).
 A job is kept when it mentions at least MIN_MATCHED_SKILLS of your skills (default 1).
 Jobs are sorted by how many of your skills they match.
 """
@@ -61,7 +61,7 @@ def fits_rules(job, description):
         if mode == "Remote":
             return True, ""
         return False, "not in Lahore and not remote"
-    kind = _norm("Remote" if mode == "Not stated" else mode)   # worldwide search
+    kind = _norm(mode)                        # worldwide: "Not stated" is NOT accepted
     if kind not in WORLDWIDE_TYPES:
         return False, f"{mode} not in your worldwide types"
     return True, ""
