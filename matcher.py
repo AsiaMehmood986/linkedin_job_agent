@@ -1,9 +1,9 @@
-"""Step 3: apply the location rules and score jobs against your skills.
+"""Step 3: apply the location and work-type rules, then score jobs against your skills.
 
-Rules:
-  - Lahore search  : remote, on-site and hybrid are all allowed
-                     (a job outside Lahore is kept only if it is remote)
-  - Worldwide etc. : REMOTE ONLY (hybrid and on-site jobs are rejected)
+Lahore table   : any work type located in Lahore, plus remote jobs elsewhere in Pakistan.
+Worldwide table: work types listed in WORLDWIDE_WORK_TYPES (default remote, hybrid, on-site).
+A job is kept when it mentions at least MIN_MATCHED_SKILLS of your skills (default 1).
+Jobs are sorted by how many of your skills they match.
 """
 import random
 import re
@@ -16,6 +16,13 @@ from utils import log
 HYBRID = re.compile(r"\bhybrid\b", re.I)
 ONSITE = re.compile(r"\bon[- ]?site\b|\bin[- ]office\b|\bin[- ]person\b", re.I)
 REMOTE = re.compile(r"\bremote\b", re.I)
+
+
+def _norm(s):
+    return s.lower().replace("-", "").replace(" ", "")
+
+
+WORLDWIDE_TYPES = {_norm(x) for x in config.WORLDWIDE_WORK_TYPES}
 
 
 def _has(skill, text):
@@ -31,30 +38,32 @@ def skill_hit(skill, text):
 
 
 def work_mode(job, description):
-    text = f"{job['title']} {job['location']} {description}"
-    if HYBRID.search(text):
-        return "Hybrid"
-    if REMOTE.search(text):
-        return "Remote"
-    if ONSITE.search(text):
-        return "On-site"
-    return "Lahore (type not stated)" if job["work_type"] == "lahore" else "Remote"
+    """Check the title and location first, then the description."""
+    for text in (f"{job['title']} {job['location']}", description):
+        if HYBRID.search(text):
+            return "Hybrid"
+        if REMOTE.search(text):
+            return "Remote"
+        if ONSITE.search(text):
+            return "On-site"
+    return "Not stated"
+
+
+def in_lahore(job):
+    return "lahore" in job["location"].lower()
 
 
 def fits_rules(job, description):
-    head = f"{job['title']} {job['location']}"
-    text = f"{head} {description}"
-    if job["work_type"] == "remote":           # worldwide: remote only
-        if HYBRID.search(head) or ONSITE.search(head):
-            return False, "hybrid/on-site in title or location"
-        if HYBRID.search(description):
-            return False, "description says hybrid"
-        if ONSITE.search(description) and not REMOTE.search(text):
-            return False, "on-site job, not remote"
-    else:                                       # Lahore: anything, if it is really Lahore
-        if "lahore" not in job["location"].lower():
-            if not REMOTE.search(text) or HYBRID.search(text):
-                return False, "not in Lahore and not remote"
+    mode = work_mode(job, description)
+    if in_lahore(job):
+        return True, ""
+    if job["work_type"] == "lahore":          # Lahore search, but located elsewhere
+        if mode == "Remote":
+            return True, ""
+        return False, "not in Lahore and not remote"
+    kind = _norm("Remote" if mode == "Not stated" else mode)   # worldwide search
+    if kind not in WORLDWIDE_TYPES:
+        return False, f"{mode} not in your worldwide types"
     return True, ""
 
 
@@ -68,18 +77,12 @@ def score_job(job, skills, description):
 
 
 def match_jobs(jobs, skills, seen):
-    fresh = [j for j in jobs if j["id"] not in seen]
-    # cap only the jobs that need an extra LinkedIn page request
-    linkedin = [j for j in fresh if not j.get("description")][:config.MAX_DETAIL_FETCH]
-    boards = [j for j in fresh if j.get("description")]
-    new_jobs = linkedin + boards
-    log(f"Matcher: checking {len(new_jobs)} new jobs")
+    fresh = [j for j in jobs if j["id"] not in seen][:config.MAX_DETAIL_FETCH]
+    log(f"Matcher: reading {len(fresh)} new jobs")
     keep = []
-    for job in new_jobs:
-        desc = job.get("description")
-        if not desc:
-            desc = fetch_description(job["id"])
-            time.sleep(random.uniform(3, 6))
+    for job in fresh:
+        desc = fetch_description(job["id"])
+        time.sleep(random.uniform(2, 4))
         if not desc:
             log(f"  SKIPPED (could not read job page, will retry next run): {job['title']}")
             continue
@@ -92,15 +95,13 @@ def match_jobs(jobs, skills, seen):
 
         job["mode"] = work_mode(job, desc)
         job["score"], job["matched"] = score_job(job, skills, desc)
-        job["is_match"] = job["score"] >= config.MIN_SCORE
-        job["desc_text"] = desc
+        job["is_match"] = (len(job["matched"]) >= config.MIN_MATCHED_SKILLS
+                           and job["score"] >= config.MIN_SCORE)
         tag = "MATCH" if job["is_match"] else "low  "
         log(f"  {tag} {job['score']:>3}% | {job['mode']} | {job['title']} | "
             f"{job['company']} | {job['location']}")
-        # job boards are not filtered by keyword, so keep only real matches from them
-        from_board = bool(job.get("source"))
-        if job["is_match"] or (config.EMAIL_ALL_JOBS and not from_board):
+        if job["is_match"] or config.EMAIL_ALL_JOBS:
             keep.append(job)
     keep.sort(key=lambda j: j["score"], reverse=True)
-    log(f"Matcher: {len(keep)} jobs will be emailed (out of {len(new_jobs)} new jobs)")
+    log(f"Matcher: {len(keep)} jobs for the email (out of {len(fresh)} read)")
     return keep

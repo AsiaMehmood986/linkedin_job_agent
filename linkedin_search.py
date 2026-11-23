@@ -1,4 +1,6 @@
-"""Step 2: search LinkedIn. Lahore = remote, on-site or hybrid. Everywhere else = remote only."""
+"""Step 2: search LinkedIn.
+Lahore table  : searches in Lahore/Pakistan (remote, hybrid and on-site).
+Worldwide table: one worldwide search per keyword. The matcher applies the work-type rules."""
 import random
 import time
 
@@ -10,6 +12,7 @@ from utils import log
 
 SEARCH_URL = "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search"
 DETAIL_URL = "https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/{id}"
+PAGE_SIZE = 25
 
 SESSION = requests.Session()
 SESSION.headers.update({
@@ -39,31 +42,9 @@ def http_get(url, params=None, retries=3):
             time.sleep(wait)
 
 
-def search_linkedin(keyword, location, work_type, use_geo=True):
-    """work_type: 'lahore' (any type) or 'remote' (f_WT=2)."""
-    params = {
-        "keywords": keyword,
-        "location": location,
-        "f_TPR": f"r{config.POSTED_WITHIN_HOURS * 3600}",
-        "start": 0,
-    }
-    if use_geo and location.lower() == "worldwide":
-        params["geoId"] = "92000000"   # LinkedIn's "Worldwide" region (any country)
-    if work_type == "remote":
-        params["f_WT"] = "2"   # remote only. Lahore searches have no filter (remote, on-site, hybrid)
-    try:
-        r = http_get(SEARCH_URL, params=params)
-        r.raise_for_status()
-    except RateLimited:
-        raise
-    except requests.RequestException as e:
-        log(f"Searcher: failed for '{keyword}' in {location}: {type(e).__name__}")
-        return []
-
+def parse_cards(html, location, work_type):
     jobs = []
-    if len(r.text.strip()) < 200:
-        log(f"Searcher: LinkedIn returned an empty page for '{keyword}' in {location}")
-    soup = BeautifulSoup(r.text, "html.parser")
+    soup = BeautifulSoup(html, "html.parser")
     for card in soup.select("li"):
         base = card.select_one("div.base-card")
         link = card.select_one("a.base-card__full-link")
@@ -86,23 +67,60 @@ def search_linkedin(keyword, location, work_type, use_geo=True):
     return jobs
 
 
+def search_linkedin(keyword, location, work_type, use_geo=True):
+    """Fetch several pages of results for one keyword + location."""
+    jobs = []
+    for page in range(config.MAX_PAGES_PER_SEARCH):
+        params = {
+            "keywords": keyword,
+            "location": location,
+            "f_TPR": f"r{config.POSTED_WITHIN_HOURS * 3600}",
+            "start": page * PAGE_SIZE,
+        }
+        if work_type == "worldwide":
+            params["f_WT"] = "2"           # remote only, filtered by LinkedIn itself
+        if use_geo and location.lower() == "worldwide":
+            params["geoId"] = "92000000"   # LinkedIn's "Worldwide" region
+        try:
+            r = http_get(SEARCH_URL, params=params)
+            r.raise_for_status()
+        except RateLimited:
+            raise
+        except requests.RequestException as e:
+            log(f"Searcher: failed for '{keyword}' in {location}: {type(e).__name__}")
+            break
+        page_jobs = parse_cards(r.text, location, work_type)
+        if not page_jobs:
+            break                          # no more results
+        jobs += page_jobs
+        if page < config.MAX_PAGES_PER_SEARCH - 1:
+            time.sleep(random.uniform(2, 4))
+    return jobs
+
+
+def _in_scope(job, work_type):
+    if work_type == "lahore":
+        where = job["location"].lower()
+        return "lahore" in where or "pakistan" in where
+    return True
+
+
 def search_all(skills):
-    """Search every keyword in Lahore (on-site) and in the remote locations."""
     keywords = skills[:config.MAX_SEARCH_KEYWORDS]
     plan = [(k, loc, "lahore") for k in keywords for loc in config.ONSITE_LOCATIONS]
-    plan += [(k, loc, "remote") for k in keywords for loc in config.REMOTE_LOCATIONS]
+    plan += [(k, loc, "worldwide") for k in keywords for loc in config.REMOTE_LOCATIONS]
 
     found, blocked_in_a_row = {}, 0
     for i, (kw, loc, kind) in enumerate(plan, 1):
         log(f"Searcher: {i}/{len(plan)} '{kw}' | {loc} | {kind}")
         try:
             jobs = search_linkedin(kw, loc, kind)
-            if kind == "remote" and not jobs and loc.lower() == "worldwide":
+            if kind == "worldwide" and not jobs:
                 log("Searcher: Worldwide gave 0 jobs, retrying without region id...")
                 time.sleep(random.uniform(6, 12))
                 jobs = search_linkedin(kw, loc, kind, use_geo=False)
-            if kind == "remote" and not jobs and loc.lower() == "worldwide":
-                log("Searcher: still 0, trying fallback regions (remote only)...")
+            if kind == "worldwide" and not jobs:
+                log("Searcher: still 0, trying fallback regions...")
                 for fb in config.REMOTE_FALLBACK:
                     time.sleep(random.uniform(6, 12))
                     jobs += search_linkedin(kw, fb, kind)
@@ -116,10 +134,8 @@ def search_all(skills):
             continue
         log(f"Searcher:    -> {len(jobs)} jobs returned")
         for job in jobs:
-            where = job["location"].lower()
-            if kind == "lahore" and not ("lahore" in where or "pakistan" in where):
-                continue
-            found.setdefault(job["id"], job)
+            if _in_scope(job, kind):
+                found.setdefault(job["id"], job)   # Lahore searches run first, so Lahore wins duplicates
         time.sleep(random.uniform(6, 12))
     log(f"Searcher: {len(found)} unique jobs found")
     return list(found.values())

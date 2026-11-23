@@ -4,8 +4,7 @@ import time
 
 import config
 from cv_reader import extract_skills_from_folder
-from cv_tailor import generate_tailored_cvs
-from emailer import send_email, send_matches
+from emailer import send_digest, send_email
 from linkedin_search import search_all
 from matcher import match_jobs
 from utils import load_seen, log, save_seen
@@ -14,9 +13,17 @@ from utils import load_seen, log, save_seen
 def get_skills():
     log(f"CV reader: reading PDFs in {config.CV_FOLDER}")
     skills = extract_skills_from_folder(
-        config.CV_FOLDER, blocked=['huawei','islamabad'], extra=config.EXTRA_SKILLS)
+        config.CV_FOLDER, blocked=config.BLOCKED_SKILLS, extra=config.EXTRA_SKILLS)
     log(f"CV reader: final skills = {skills}")
     return skills
+
+
+def split_tables(jobs):
+    """Lahore table: jobs located in Lahore. Worldwide table: everything else."""
+    lahore = [j for j in jobs if "lahore" in j["location"].lower()]
+    lahore_ids = {j["id"] for j in lahore}
+    worldwide = [j for j in jobs if j["id"] not in lahore_ids]
+    return lahore[:config.MAX_PER_TABLE], worldwide[:config.MAX_PER_TABLE]
 
 
 def run_once(dry_run=False):
@@ -24,18 +31,17 @@ def run_once(dry_run=False):
     skills = get_skills()
     jobs = search_all(skills)
     good = match_jobs(jobs, skills, seen)
+    lahore, worldwide = split_tables(good)
     if dry_run:
-        for j in good:
-            print(f"- [{j['score']}%] {j['title']} | {j['company']} | "
-                  f"{j['mode']} | {j['location']}\n  {j['url']}")
-    #     if config.TAILOR_CVS and good:
-    #         generate_tailored_cvs(good)   # PDFs are saved in tailored_cvs/ only
-    #     log("Dry run: no email sent, seen list not saved.")
-    #     return
-    # if config.TAILOR_CVS and good:
-    #     generate_tailored_cvs(good)       # tailored PDFs, one per selected job
-    send_matches(good)                    # ONE email: jobs + apply links + CVs attached
-    save_seen(config.SEEN_FILE, seen)
+        for label, group in (("LAHORE", lahore), ("WORLDWIDE", worldwide)):
+            print(f"\n== {label} ({len(group)})")
+            for j in group:
+                print(f"- [{j['score']}%] {j['title']} | {j['company']} | "
+                      f"{j['mode']} | {j['location']}\n  {j['url']}")
+        log("Dry run: no email sent, seen list not saved.")
+        return
+    send_digest(lahore, worldwide)     # ONE email: Lahore table + Worldwide table
+    save_seen(config.SEEN_FILE, seen)  # saved only after the email went out
 
 
 def main():

@@ -1,8 +1,8 @@
-"""Step 4: emails through the Resend API (resend.com).
-Email 1 = the job list.  Email 2 = tailored CVs attached, ready for you to apply."""
-import base64
+"""Step 4: email through Resend (resend.com).
+One email with two tables: Lahore jobs first, then Worldwide jobs.
+Columns: Job title | Location | Work type | Link."""
+import html
 import sys
-from pathlib import Path
 
 import requests
 
@@ -37,53 +37,64 @@ def send_email(subject, text_body, html_body, attachments=None):
         sys.exit(f"Could not reach Resend ({type(e).__name__}). Check your internet.")
     if r.status_code >= 400:
         sys.exit(f"Resend error {r.status_code}: {r.text}\n"
-                 "Common causes: wrong API key; or using onboarding@resend.dev while "
-                 "EMAIL_TO {config.EMAIL_TO}is not the email you signed up to Resend with; or EMAIL_FROM{config.EMAIL_FROM} "
-                 "uses a domain you have not verified in Resend.")
+                 "Common causes: wrong API key; using onboarding@resend.dev while EMAIL_TO "
+                 f"({config.EMAIL_TO}) is not the email you signed up to Resend with; or EMAIL_FROM "
+                 f"({config.EMAIL_FROM}) uses a domain you have not verified in Resend.")
     return r.json()
 
 
-def _line(j):
-    kind = j.get("mode", "")
-    src = j.get("source", "LinkedIn")
-    why = ", ".join(j["matched"][:8]) or "title match"
-    return kind, src, why
+def _esc(value):
+    return html.escape(str(value or ""))
 
 
-def send_matches(good_jobs):
-    """ONE email: every selected job with its apply link, plus the tailored CVs attached."""
-    if not good_jobs:
+def _html_table(title, jobs):
+    if not jobs:
+        return f"<h2>{title}</h2><p>No new matching jobs in this run.</p>"
+    rows = "".join(
+        "<tr>"
+        f"<td><b>{_esc(j['title'])}</b><br><small>{_esc(j['company'])} &middot; "
+        f"match {j['score']}%</small></td>"
+        f"<td>{_esc(j['location'])}</td>"
+        f"<td>{_esc(j['mode'])}</td>"
+        f"<td><a href='{_esc(j['url'])}'>Apply</a></td>"
+        "</tr>"
+        for j in jobs
+    )
+    return (
+        f"<h2>{title} ({len(jobs)})</h2>"
+        "<table border='1' cellpadding='6' cellspacing='0' "
+        "style='border-collapse:collapse;font-family:Arial,sans-serif;font-size:14px'>"
+        "<tr style='background:#eee'><th>Job title</th><th>Location</th>"
+        "<th>Work type</th><th>Link</th></tr>"
+        f"{rows}</table>"
+    )
+
+
+def _text_table(title, jobs):
+    if not jobs:
+        return f"{title}: no new matching jobs in this run.\n"
+    lines = [f"- {j['title']} | {j['company']} | {j['location']} | {j['mode']} | {j['url']}"
+             for j in jobs]
+    return f"{title} ({len(jobs)})\n" + "\n".join(lines) + "\n"
+
+
+def send_digest(lahore, worldwide):
+    """Send one email with the Lahore table and the Worldwide table."""
+    if not lahore and not worldwide and not config.SEND_EMPTY_DIGEST:
+        log("Emailer: no matching jobs this run, no email sent.")
         return
-    attachments, lines, rows = [], [], []
-    note = ("Apply links, tailored CVs and cover letters for your selected jobs. I have NOT applied for you: "
-            "open each link, check the CV, and press Apply. Skills listed as 'not on your CV' "
-            "were left out on purpose. Add them yourself only if you genuinely have them.")
-    for n, j in enumerate(good_jobs, 1):
-        kind, src, why = _line(j)
-        pdf = Path(j["pdf_path"]) if j.get("pdf_path") else None
-        if pdf and pdf.exists():
-            names = [pdf.name]
-            for p in [pdf, Path(j["cover_path"]) if j.get("cover_path") else None]:
-                if p and p.exists():
-                    attachments.append({"filename": p.name,
-                                        "content": base64.b64encode(p.read_bytes()).decode()})
-                    if p is not pdf:
-                        names.append(p.name)
-            cv = "Attached: " + ", ".join(names)
-            missing = ", ".join(j.get("missing_skills", [])) or "none found"
-            gap = (f"CV keyword coverage: {j.get('ats_coverage', 0)}% of the job's must-haves | "
-                   f"Not on your CV (job asks for these): {missing}")
-        else:
-            cv, gap = "CV: not generated for this job", ""
-        lines.append(f"{n}. {j['title']} at {j['company']}\n{kind} | {j['location']} | "
-                     f"via {src} | Match {j['score']}%\nMatches: {why}\n"
-                     f"Apply: {j['url']}\n{cv}\n{gap}\n")
-        rows.append(f"<p>{n}. <b><a href='{j['url']}'>{j['title']}</a></b> at {j['company']}<br>"
-                    f"{kind} | {j['location']} | via {src} | Match {j['score']}%<br>"
-                    f"<small>Matches: {why}<br>{cv}<br>{gap}</small></p>")
-    send_email(f"{len(good_jobs)} job(s) with apply links and tailored CVs",
-               note + "\n\n" + "\n".join(lines),
-               f"<html><body><p>{note}</p>" + "".join(rows) + "</body></html>",
-               attachments or None)
-    log(f"Emailer: ONE email sent with {len(good_jobs)} jobs and "
-        f"{len(attachments)} CVs attached to {config.EMAIL_TO}")
+    if lahore or worldwide:
+        subject = f"Job digest: {len(lahore)} in Lahore, {len(worldwide)} worldwide"
+    else:
+        subject = "Job digest: no new matches this run"
+    text_body = _text_table("LAHORE JOBS", lahore) + "\n" + _text_table("WORLDWIDE JOBS", worldwide)
+    html_body = (
+        "<html><body style='font-family:Arial,sans-serif'>"
+        + _html_table("Lahore Jobs", lahore) + "<br>"
+        + _html_table("Worldwide Jobs", worldwide)
+        + "<p><small>Review each posting before you apply. The agent does not apply for you.</small></p>"
+        "</body></html>"
+    )
+    send_email(subject, text_body, html_body)
+    log(f"Emailer: ONE email sent with {len(lahore)} Lahore and {len(worldwide)} worldwide jobs "
+        f"to {config.EMAIL_TO}")
