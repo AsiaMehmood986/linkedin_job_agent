@@ -23,6 +23,7 @@ def split_tables(jobs):
     lahore = [j for j in jobs if "lahore" in j["location"].lower()]
     lahore_ids = {j["id"] for j in lahore}
     worldwide = [j for j in jobs if j["id"] not in lahore_ids]
+    worldwide.sort(key=lambda j: 0 if j["mode"] == "Remote" else 1)
     return lahore[:config.MAX_PER_TABLE], worldwide[:config.MAX_PER_TABLE]
 
 
